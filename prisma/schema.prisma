@@ -1,0 +1,90 @@
+// PulseWatch database schema — PostgreSQL (Neon in production).
+// DATABASE_URL lives in .env.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String // bcrypt hash — never the plain password
+  name      String?
+  createdAt DateTime  @default(now())
+  monitors  Monitor[]
+
+  // Billing / subscription
+  plan                   String    @default("free") // free | pro | business
+  razorpayCustomerId     String?
+  razorpaySubscriptionId String?
+  subscriptionStatus     String? // created | authenticated | active | halted | cancelled | completed
+  currentPeriodEnd       DateTime?
+}
+
+model Monitor {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  url       String
+  method    String   @default("GET")
+  // how often to check, in seconds
+  interval  Int      @default(60)
+  // request timeout in milliseconds
+  timeout   Int      @default(10000)
+  // treat this HTTP status (and below nextStatus) as "up"
+  expectedStatusMin Int @default(200)
+  expectedStatusMax Int @default(399)
+
+  paused    Boolean  @default(false)
+
+  // public status page
+  slug      String   @unique @default(cuid())
+  isPublic  Boolean  @default(false)
+
+  // alerting
+  alertEmail String?
+
+  // denormalised current state for fast dashboard reads
+  currentStatus String  @default("pending") // up | down | pending
+  lastCheckedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  checks    Check[]
+  incidents Incident[]
+
+  @@index([userId])
+}
+
+model Check {
+  id           String   @id @default(cuid())
+  monitorId    String
+  monitor      Monitor  @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  status       String   // up | down
+  statusCode   Int?
+  responseTime Int?     // milliseconds
+  error        String?
+  checkedAt    DateTime @default(now())
+
+  @@index([monitorId, checkedAt])
+}
+
+model Incident {
+  id          String    @id @default(cuid())
+  monitorId   String
+  monitor     Monitor   @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  startedAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+  cause       String? // e.g. "HTTP 503" or "timeout"
+
+  @@index([monitorId])
+}
